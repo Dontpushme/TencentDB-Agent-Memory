@@ -45,6 +45,7 @@ SCOPE=""             # user | project
 WORKSPACE=""
 RESTART=0
 NON_INTERACTIVE=0
+STORE_BACKEND=""     # sqlite | postgres | ""（未选）
 
 # 配置直通
 PG_DB="" PG_USER="" PG_PASSWORD="" PG_HOST="" PG_PORT="" PG_SCHEMA="" PG_SSL=0 PG_VIDX="" PG_TEXTCFG=""
@@ -266,20 +267,38 @@ check_deps_installed() {
     fi
 }
 
-interactive_postgres() {
-    header "PostgreSQL 配置（默认后端，pgvector 必需）"
+# ─── 存储后端选择 ───
+interactive_storage() {
+    header "存储后端"
     echo
-    hint "  PostgreSQL 是记忆存储的默认后端，需要已安装 pgvector 扩展。\n"
-    hint "  如 PostgreSQL 尚未准备就绪，可输入 'skip' 稍后手动配置。\n\n"
+    cat <<'EOF'
+  请选择记忆存储后端：
 
-    prompt "  是否现在配置 PostgreSQL？ ${DIM}(Y/n/skip=跳过)${NC}: "
-    IFS= read -r REPLY
-    REPLY="${REPLY:-y}"
-    case "${REPLY,,}" in
-        skip|s) log "跳过 PostgreSQL 配置，稍后可手动运行:"; hint "  bash $CTL_SRC config postgres --database D --user U ...\n"; echo; return 0 ;;
-        n|no|否) log "跳过 PostgreSQL 配置"; echo; return 0 ;;
-    esac
+  1) SQLite（本地文件，零依赖，开箱即用）
+     数据存储在本地 SQLite + sqlite-vec，无需外部服务
 
+  2) PostgreSQL（pgvector，需 PG 服务）
+     支持多用户共享记忆，需要已安装 pgvector 扩展
+
+  3) 跳过（稍后手动配置）
+EOF
+    echo
+    while true; do
+        prompt "  请选择 ${DIM}(1/2/3)${NC}: "
+        IFS= read -r REPLY
+        case "${REPLY:-1}" in
+            1) STORE_BACKEND="sqlite";  log "选择 SQLite（本地存储）"; echo; return 0 ;;
+            2) STORE_BACKEND="postgres"; interactive_pg_config; echo; return 0 ;;
+            3) STORE_BACKEND=""; log "跳过存储配置"; echo; return 0 ;;
+            *) err "请输入 1、2 或 3" ;;
+        esac
+    done
+}
+
+# 仅在选了 PG 后才调用
+interactive_pg_config() {
+    log "配置 PostgreSQL 连接…"
+    hint "  需要已安装 pgvector 扩展。\n"
     ask PG_DB   "数据库名" "postgres"
     PG_DB="$REPLY"
     ask PG_USER "用户名"   "postgres"
@@ -297,7 +316,7 @@ interactive_postgres() {
 
     # 高级选项
     echo
-    prompt "  是否配置高级 PostgreSQL 选项（向量索引/SSL）？ ${DIM}(y/N)${NC}: "
+    prompt "  是否配置高级选项（向量索引/SSL）？ ${DIM}(y/N)${NC}: "
     IFS= read -r REPLY
     if [[ "${REPLY,,}" == y || "${REPLY,,}" == yes ]]; then
         ask_select PG_VIDX "向量索引类型：" "hnsw" "ivfflat" "diskann" "none"
@@ -306,7 +325,6 @@ interactive_postgres() {
     fi
 
     log "PostgreSQL: ${PG_USER}@${PG_HOST}:${PG_PORT}/${PG_DB}$([[ -n "$PG_PASSWORD" ]] && echo ' ***')"
-    echo
 }
 
 interactive_llm() {
@@ -379,9 +397,11 @@ interactive_review() {
         printf "    项目级（按项目隔离 → %s/.codebuddy/skills/memory-tencentdb）\n" "${WORKSPACE:-$PWD}"
     fi
     echo
-    printf "  ${BOLD}PostgreSQL${NC}\n"
-    if [[ -n "$PG_DB" ]]; then
-        printf "    %s@%s:%s/%s$([[ -n "$PG_PASSWORD" ]] && echo ' ***')\n" "$PG_USER" "$PG_HOST" "$PG_PORT" "$PG_DB"
+    printf "  ${BOLD}存储后端${NC}\n"
+    if [[ "$STORE_BACKEND" == "sqlite" ]]; then
+        printf "    SQLite（本地文件，零依赖）\n"
+    elif [[ "$STORE_BACKEND" == "postgres" ]]; then
+        printf "    PostgreSQL: %s@%s:%s/%s$([[ -n "$PG_PASSWORD" ]] && echo ' ***')\n" "$PG_USER" "$PG_HOST" "$PG_PORT" "$PG_DB"
         [[ -n "$PG_VIDX" ]] && printf "    向量索引: %s\n" "$PG_VIDX"
         [[ $PG_SSL -eq 1 ]] && printf "    SSL: 启用\n"
         [[ -n "$PG_TEXTCFG" ]] && printf "    分词器: %s\n" "$PG_TEXTCFG"
@@ -405,9 +425,9 @@ interactive_review() {
         printf "    ${DIM}（未配置）${NC}\n"
     fi
     echo
-    ask_select _final "下一步操作：" "确认安装" "重新填写 PostgreSQL" "重新填写 LLM" "重新填写 Embedding" "取消退出"
+    ask_select _final "下一步操作：" "确认安装" "重新选择存储后端" "重新填写 LLM" "重新填写 Embedding" "取消退出"
     case "$REPLY" in
-        "重新填写 PostgreSQL") interactive_postgres; interactive_review ;;
+        "重新选择存储后端")   interactive_storage; interactive_review ;;
         "重新填写 LLM")       interactive_llm;  interactive_review ;;
         "重新填写 Embedding") interactive_embedding; interactive_review ;;
         "取消退出")           log "已取消"; exit 0 ;;
@@ -482,7 +502,7 @@ if [[ $DO_UNINSTALL -eq 0 ]]; then
             check_deps_installed
             echo
 
-            interactive_postgres
+            interactive_storage
             interactive_llm
             interactive_embedding
             interactive_review
@@ -574,9 +594,12 @@ run_ctl() {
 
 header "写入配置"
 
-# PostgreSQL（默认后端）
-if [[ -n "$PG_DB" && -n "$PG_USER" ]]; then
-    log "PostgreSQL → tdai-gateway.json"
+# 存储后端
+if [[ "$STORE_BACKEND" == "sqlite" ]]; then
+    log "存储后端 → SQLite（本地）"
+    run_ctl config vdb-off
+elif [[ "$STORE_BACKEND" == "postgres" ]]; then
+    log "存储后端 → PostgreSQL"
     pg_args=(config postgres --database "$PG_DB" --user "$PG_USER")
     [[ -n "$PG_PASSWORD" ]] && pg_args+=(--password "$PG_PASSWORD")
     [[ -n "$PG_HOST"     ]] && pg_args+=(--host "$PG_HOST")
@@ -587,8 +610,9 @@ if [[ -n "$PG_DB" && -n "$PG_USER" ]]; then
     [[ -n "$PG_TEXTCFG"  ]] && pg_args+=(--text-config "$PG_TEXTCFG")
     run_ctl "${pg_args[@]}"
 else
-    warn "未提供 PG 连接；稍后请运行:"
-    hint "  bash $CTL_SRC config postgres --database D --user U ...\n"
+    warn "未选择存储后端；稍后请运行:"
+    hint "  bash $CTL_SRC config vdb-off     # SQLite\n"
+    hint "  bash $CTL_SRC config postgres ...   # PostgreSQL\n"
 fi
 
 # LLM（L1 提取必需）

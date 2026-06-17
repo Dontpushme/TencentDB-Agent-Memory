@@ -275,26 +275,39 @@ run_ctl() {
 }
 
 if is_tty; then
-    # PostgreSQL
+    # 存储后端选择
     echo
-    printf '%b是否配置 PostgreSQL（默认后端）？ %b(Y/n/skip)%b: ' "$BLD" "$DIM" "$NC"
-    IFS= read -r REPLY; REPLY="${REPLY:-y}"
-    case "${REPLY,,}" in
-        skip|s|n|no|否) warn "跳过 PostgreSQL 配置，稍后可运行: bash $CTL_PATH config postgres --database D --user U ..." ;;
-        *)
-            printf '%b数据库名 %b[postgres]%b: '    "$BLD" "$DIM" "$NC"; IFS= read -r PG_DB;   PG_DB="${PG_DB:-postgres}"
-            printf '%b用户名   %b[postgres]%b: '    "$BLD" "$DIM" "$NC"; IFS= read -r PG_USER; PG_USER="${PG_USER:-postgres}"
-            printf '%b密码（不显示）%b: '              "$BLD" "$NC"         ; IFS= read -rs PG_PWD; echo
-            printf '%b主机     %b[127.0.0.1]%b: '   "$BLD" "$DIM" "$NC"; IFS= read -r PG_HOST; PG_HOST="${PG_HOST:-127.0.0.1}"
-            printf '%b端口     %b[5432]%b: '         "$BLD" "$DIM" "$NC"; IFS= read -r PG_PORT; PG_PORT="${PG_PORT:-5432}"
-            printf '%bSchema   %b[agent_memory]%b: ' "$BLD" "$DIM" "$NC"; IFS= read -r PG_SCHEMA; PG_SCHEMA="${PG_SCHEMA:-agent_memory}"
-            printf '%b中文分词 %b[simple/jieba]%b: ' "$BLD" "$DIM" "$NC"; IFS= read -r PG_TEXTCFG; PG_TEXTCFG="${PG_TEXTCFG:-simple}"
-            hint "  simple=英文分词（默认），jieba=中文分词（需 pg_jieba 扩展）\n"
-            args=(config postgres --database "$PG_DB" --user "$PG_USER" --host "$PG_HOST" --port "$PG_PORT" --schema "$PG_SCHEMA" --text-config "$PG_TEXTCFG")
-            [[ -n "$PG_PWD" ]] && args+=(--password "$PG_PWD")
-            run_ctl "${args[@]}"
-            ;;
-    esac
+    echo "  请选择记忆存储后端："
+    echo "    1) SQLite（本地文件，零依赖，开箱即用）"
+    echo "    2) PostgreSQL（pgvector，需 PG 服务）"
+    echo "    3) 跳过（稍后手动配置）"
+    while true; do
+        printf '%b  选择 %b(1/2/3)%b: ' "$BLD" "$DIM" "$NC"
+        IFS= read -r REPLY; REPLY="${REPLY:-1}"
+        case "$REPLY" in
+            1)
+                log "存储后端 → SQLite（本地）"
+                run_ctl config vdb-off
+                break
+                ;;
+            2)
+                printf '%b数据库名 %b[postgres]%b: '    "$BLD" "$DIM" "$NC"; IFS= read -r PG_DB;   PG_DB="${PG_DB:-postgres}"
+                printf '%b用户名   %b[postgres]%b: '    "$BLD" "$DIM" "$NC"; IFS= read -r PG_USER; PG_USER="${PG_USER:-postgres}"
+                printf '%b密码（不显示）%b: '              "$BLD" "$NC"         ; IFS= read -rs PG_PWD; echo
+                printf '%b主机     %b[127.0.0.1]%b: '   "$BLD" "$DIM" "$NC"; IFS= read -r PG_HOST; PG_HOST="${PG_HOST:-127.0.0.1}"
+                printf '%b端口     %b[5432]%b: '         "$BLD" "$DIM" "$NC"; IFS= read -r PG_PORT; PG_PORT="${PG_PORT:-5432}"
+                printf '%bSchema   %b[agent_memory]%b: ' "$BLD" "$DIM" "$NC"; IFS= read -r PG_SCHEMA; PG_SCHEMA="${PG_SCHEMA:-agent_memory}"
+                printf '%b中文分词 %b[simple/jieba]%b: ' "$BLD" "$DIM" "$NC"; IFS= read -r PG_TEXTCFG; PG_TEXTCFG="${PG_TEXTCFG:-simple}"
+                hint "  simple=英文分词（默认），jieba=中文分词（需 pg_jieba 扩展）\n"
+                args=(config postgres --database "$PG_DB" --user "$PG_USER" --host "$PG_HOST" --port "$PG_PORT" --schema "$PG_SCHEMA" --text-config "$PG_TEXTCFG")
+                [[ -n "$PG_PWD" ]] && args+=(--password "$PG_PWD")
+                run_ctl "${args[@]}"
+                break
+                ;;
+            3) warn "跳过存储配置"; break ;;
+            *) err "请输入 1、2 或 3" ;;
+        esac
+    done
 
     # LLM
     echo
