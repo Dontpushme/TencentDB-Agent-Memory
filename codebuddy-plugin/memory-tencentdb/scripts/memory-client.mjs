@@ -31,8 +31,8 @@ import { readFileSync } from "node:fs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8420";
-const DEFAULT_TIMEOUT_MS = 10_000;
-const RECALL_TIMEOUT_MS = 3_000;
+const DEFAULT_TIMEOUT_MS = 30_000;   // search 等非关键路径：30s（Ollama 冷启动可达 ~14s）
+const RECALL_TIMEOUT_MS = 5_000;     // recall 在用户等待路径上：5s（热模型 <1s，冷启动降级）
 const GLOBAL_SESSION = "codebuddy:global";
 
 // ----------------------------------------------------------------------------

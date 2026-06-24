@@ -65,9 +65,28 @@ resolve_ctl() {
     return 1
 }
 
+# 预热 Ollama embedding 模型（后台异步，不阻塞 Gateway 就绪）。
+# 发一个轻量 embedding 请求触发模型加载，避免首次 search 时冷启动超时。
+warmup_embedding() {
+    local ollama_url="${OLLAMA_HOST:-http://localhost:11434}"
+    # 后台发送，不阻塞主流程
+    python3 - "$ollama_url" <<'PYEOF' >/dev/null 2>&1 &
+import json, sys, urllib.request
+base = sys.argv[1].rstrip("/")
+url = f"{base}/api/embed"
+body = json.dumps({"model": "bge-m3", "input": "warmup", "keep_alive": "30m"}).encode()
+req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+try:
+    urllib.request.urlopen(req, timeout=30)
+except Exception:
+    pass
+PYEOF
+}
+
 main() {
     if health_check 3; then
         log "Gateway 已在线 http://$GATEWAY_HOST:$GATEWAY_PORT"
+        warmup_embedding
         echo "ok"
         return 0
     fi
@@ -87,6 +106,7 @@ main() {
     for i in $(seq 1 10); do
         if health_check 2; then
             log "Gateway 已就绪 http://$GATEWAY_HOST:$GATEWAY_PORT"
+            warmup_embedding
             echo "ok"
             return 0
         fi
