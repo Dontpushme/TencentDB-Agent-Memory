@@ -370,8 +370,10 @@ const MAX_BATCH_SIZE = 256;
  * Total attempts = MAX_RETRIES + 1. Exponential backoff: 500ms × attempt.
  */
 const MAX_RETRIES = 3;
-/** Default timeout per API call in milliseconds */
-const DEFAULT_API_TIMEOUT_MS = 10_000;
+/** Default timeout per API call in milliseconds.
+ *  Ollama cold-starts (model loading from disk) can take 10-15s;
+ *  use 30s to avoid premature aborts while keeping a reasonable ceiling. */
+const DEFAULT_API_TIMEOUT_MS = 30_000;
 
 /**
  * Custom error class for embedding API errors that carries HTTP status code.
